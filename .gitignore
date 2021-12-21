@@ -1,0 +1,17 @@
+# Gradle
+/build/
+/.gradle/
+
+# IDEs
+*.iml
+*.ipr
+/.idea/
+/.classpath
+/.factorypath
+/.settings/
+/.apt_generated/
+/.apt_generated_test/
+
+# OS specifics
+.DS_Store
+Thumbs.db

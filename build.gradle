@@ -1,0 +1,22 @@
+buildscript {
+    ext {
+        indraVersion = '2.0.6'
+    }
+}
+
+plugins {
+    id 'net.kyori.indra' version "$indraVersion"
+    id 'net.kyori.indra.publishing' version "$indraVersion"
+}
+
+group = 'ca.stellardrift'
+description = 'A test project for experimenting with build setup'
+
+indra {
+    github('zml2008', 'java-test-project') {
+        ci true
+    }
+
+    publishReleasesTo 'stellardrift', 'https://repo.stellardrift.ca/repository/internal/'
+    publishSnapshotsTo 'stellardrift', 'https://repo.stellardrift.ca/repository/snapshots/'
+}
