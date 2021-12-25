@@ -72,7 +72,7 @@ runs:
       for i in $REVIEWDOG_JSONS; do
         echo "Reviewing $i"
         if [ -f "$i" ]; then
-          cat $i | reviewdog -reporter=github-check -f=rdjson
+          cat $i | reviewdog -reporter=github-check -f=rdjson -name=$(basename "$i")
         fi
       done
       
