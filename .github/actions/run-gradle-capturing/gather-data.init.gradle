@@ -75,7 +75,6 @@ gradle.afterProject { project ->
       testClassListFile.withWriter('utf-8') { writer -> 
         Task next = null;
         while ((next = inputTasks.poll()) != null) {
-          println next.class
           if (next instanceof SourceTask) {
             next.source.each { file -> 
                 writer.writeLine file.absolutePath

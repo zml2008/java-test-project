@@ -18,10 +18,10 @@ inputs:
 outputs:
   project_dirs:
     description: 'Project directories for all projects'
-    value: "${{ join(fromJSON(steps.execute.outputs.project-metadata).projectDirs, '\n') }}"
+    value: "${{ join(fromJSON(steps.execute.outputs.project-metadata || '{}').projectDirs, '\n') }}"
   project_version:
     description: 'The current version of the root project'
-    value: "${{ fromJSON(steps.execute.outputs.project-metadata).version }}"
+    value: "${{ fromJSON(steps.execute.outputs.project-metadata || '{}').version }}"
 
 runs:
   using: composite
@@ -35,14 +35,17 @@ runs:
     with:
       cache-read-only: "${{ inputs.store-cache }}"
       arguments: |
-        -I ./.github/actions/run-gradle-capturing/gather-data.init.gradle
+        -I ${{ github.action_path }}/gather-data.init.gradle
         ${{ inputs.arguments }}
   - name: "Process project output"
     id: "process-meta"
     uses: "actions/github-script@v5"
+    if: "${{ always() }}"
+    env:
+      DATA: "${{ steps.execute.outputs.project-metadata }}"
     with:
       script: |
-        const script = require('./.github/actionsrun-gradle-capturing/process-gradle-data.js')
+        const script = require('${{ github.action_path }}/process-gradle-data.js')
         await script({github, context, core, require})
   #- name: "Archive test results" # TODO, maybe build this in the process-meta action
   #  if: "${{ always() }}"
@@ -51,6 +54,10 @@ runs:
   #    name: "${{ runner.os }}-test-results"
   #    path: "${{ join(fromJSON(steps.execute.outputs.project-metadata).projectDirs + '/build/reports', '\n') }}"
   # Run reviewdog on captured output
+  - name: "test - print json blob"
+    if: "${{ always() }}"
+    shell: bash
+    run: "echo ${{ steps.execute.outputs.project-metadata }}"
   - name: "output / checkstyle"
     if: "${{ runner.os == 'Linux' && always() }}"
     env:
