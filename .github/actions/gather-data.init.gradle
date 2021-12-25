@@ -1,0 +1,120 @@
+// Collect paths
+def projectDirs = java.util.concurrent.ConcurrentHashMap.newKeySet()
+def testExecutions = java.util.concurrent.ConcurrentHashMap.newKeySet()
+def checkstyleReports = java.util.concurrent.ConcurrentHashMap.newKeySet()
+def javacLogs = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+class StdoutCapture implements StandardOutputListener {
+  final BufferedWriter os
+
+  StdoutCapture(final BufferedWriter os) {
+    this.os = os
+  }
+
+  @Override
+  void onOutput(final CharSequence output) {
+    os.append(output)
+  }
+}
+
+class TaskCaptureListener implements TaskExecutionListener {
+  private final ThreadLocal<StandardOutputListener> state = ThreadLocal.withInitial { null }
+
+  @Override
+  void beforeExecute(Task task) {
+    if (task instanceof AbstractCompile && task.hasProperty('outputLogFile')) {
+      task.outputLogFile.parentFile.mkdirs()
+      def listener = new StdoutCapture(task.outputLogFile.newWriter('UTF-8'))
+      // task.logging.addStandardOutputListener(listener)
+      task.logging.addStandardErrorListener(listener)
+      state.set(listener)
+    }
+  }
+
+  @Override
+  void afterExecute(final Task task, final TaskState state) {
+    if (task instanceof AbstractCompile) {
+      def oldCapture = this.state.get()
+      this.state.remove()
+      if (oldCapture != null) {
+        // task.logging.removeStandardOutputListener(oldCapture)
+        task.logging.removeStandardErrorListener(oldCapture)
+        oldCapture.os.close()
+      }
+    }
+  }
+}
+
+// Capture task output to a file
+def taskCapture = new TaskCaptureListener()
+gradle.addListener taskCapture
+
+gradle.afterProject { project ->
+  // Capture project directory
+  projectDirs << project.projectDir
+
+  // Log test task output
+  project.tasks.withType(Test) {
+    def testClassList = reports.junitXml.outputLocation.file('test-classpath.txt')
+    outputs.file(testClassList)
+    reports {
+      junitXml {
+        // Make sure we're enabled
+        required = true
+      }
+    }
+
+    doFirst {
+      // Write all test class directories to a file in the report discord
+      def testClassListFile = testClassList.get().asFile
+      testExecutions.add(testClassListFile.parentFile)
+
+      // The JUnit XML doesn't give us actual file names, so we have to link up the source files used to build these test tasks with the actual classpath
+      def inputTasks = new java.util.ArrayDeque<Task>(testClassesDirs.buildDependencies.getDependencies(it))
+
+      testClassListFile.withWriter('utf-8') { writer -> 
+        Task next = null;
+        while ((next = inputTasks.poll()) != null) {
+          println next.class
+          if (next instanceof SourceTask) {
+            next.source.each { file -> 
+                writer.writeLine file.absolutePath
+            }
+          } else {
+            inputTasks.addAll next.taskDependencies.getDependencies(next)
+          }
+        }
+      }
+    }
+  }
+
+  // Capture checkstyle output
+  project.tasks.withType(Checkstyle) {
+    reports.xml.required = true
+
+    doFirst {
+      checkstyleReports << reports.xml.outputLocation.get().asFile
+    }
+  }
+
+  // capture output of javac
+  def layout = project.layout
+  project.tasks.withType(JavaCompile) {
+    it.ext.outputLogFile = layout.buildDirectory.file("java-compile-output/${it.name}.log").get().asFile
+    doFirst {
+      javacLogs << it.outputLogFile
+    }
+  }
+}
+
+// Provide JSON data to subsequent tasks
+gradle.buildFinished {
+    def json = groovy.json.JsonOutput.toJson([
+      version: gradle.rootProject.version,
+      projectDirs: projectDirs.collect { it.absolutePath },
+      testExecutions: testExecutions.collect { it.absolutePath },
+      checkstyleReports: checkstyleReports.collect { it.absolutePath },
+      javacLogs: javacLogs.collect { it.absolutePath }
+    ])
+    println "::set-output name=project-metadata::${json}"
+}

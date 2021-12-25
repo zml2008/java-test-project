@@ -1,0 +1,63 @@
+name: 'Run Gradle'
+description: |
+  Run Gradle capturing relevant output.
+
+  The Java environment must already be set up, by using the `setup-java` action or any other means.
+
+inputs:
+  store-cache:
+    description: 'Whether to write data to the cache'
+    required: false
+    type: 'boolean'
+    default: true
+  arguments:
+    description: 'Arguments to pass to Gradle'
+    required: true
+    type: 'string'
+outputs:
+  project_dirs:
+    description: 'Project directories for all projects'
+    value: "${{ join(fromJSON(steps.execute.outputs.project-metadata).projectDirs, '\n') }}"
+  project_version:
+    description: 'The current version of the root project'
+    value: "${{ fromJSON(steps.execute.outputs.project-metadata).version }}"
+
+runs:
+  using: composite
+  steps:
+  - name: 'Setup Reviewdog'
+    uses: reviewdog/action-setup@v1
+    if: ${{ runner.os == 'Linux' }}
+  - name: "Run Gradle build"
+    id: "execute"
+    uses: "gradle/gradle-build-action@v2"
+    with:
+      cache-read-only: "${{ inputs.store-cache }}"
+      arguments: |
+        -I ./.github/actions/gather-data.init.gradle
+        ${{ inputs.arguments }}
+  - name: "Process project output"
+    id: "process-meta"
+    uses: "actions/github-script@v5"
+    with:
+      script: |
+        const script = require('./.github/actions/process-gradle-data.js')
+        await script({github, context, core, require})
+  - name: "Archive test results"
+    if: "${{ always() }}"
+    uses: "actions/upload-artifact@v2"
+    with:
+      name: "${{ runner.os }}-test-results"
+      path: "${{ join(fromJSON(steps.execute.outputs.project-metadata).projectDirs + '/build/reports', '\n') }}"
+  # Run reviewdog on captured output
+  - name: "output / checkstyle"
+    if: "${{ runner.os == 'Linux' && always() }}"
+    env:
+      REVIEWDOG_GITHUB_API_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+      CHECKSTYLE_FILES: "${{ join(fromJSON(steps.execute.outputs.project-metadata).checkstyleReports, '\n') }}"
+    run: |
+      for i in "$CHECKSTYLE_FILES"; do
+        cat $i | reviewdog -reporter=github-check -f=checkstyle -name="checkstyle"
+      done
+      
+  
