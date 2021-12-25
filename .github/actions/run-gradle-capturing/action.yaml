@@ -39,12 +39,10 @@ runs:
     id: "process-meta"
     uses: "actions/github-script@v5"
     if: "${{ always() }}"
-    env:
-      DATA: "${{ steps.execute.outputs.project-metadata }}"
     with:
       script: |
-        const script = require('${{ github.action_path }}/process-gradle-data.js')
-        await script({github, context, core, require})
+        // Archive test results here
+        console.log('todo')
   #- name: "Archive test results" # TODO, maybe build this in the process-meta action
   #  if: "${{ always() }}"
   #  uses: "actions/upload-artifact@v2"
@@ -64,11 +62,18 @@ runs:
       REVIEWDOG_JSONS: "${{ join(fromJSON(steps.execute.outputs.project-metadata).reviewdogJsons, '\n') }}"
     shell: "bash"
     run: |
-      for i in "$CHECKSTYLE_FILES"; do
-        cat $i | reviewdog -reporter=github-check -f=checkstyle -name="checkstyle"
+      IFS=$'\n'
+      for i in $CHECKSTYLE_FILES; do
+        echo "Reviewing $i"
+        if [ -f "$i" ]; then
+          cat $i | reviewdog -reporter=github-check -f=checkstyle -name="checkstyle"
+        fi
       done
-      for i in "$REVIEWDOG_JSONS"; do
-        cat $i | reviewdog -reporter=github-check -f=rdjson
+      for i in $REVIEWDOG_JSONS; do
+        echo "Reviewing $i"
+        if [ -f "$i" ]; then
+          cat $i | reviewdog -reporter=github-check -f=rdjson
+        fi
       done
       
   
