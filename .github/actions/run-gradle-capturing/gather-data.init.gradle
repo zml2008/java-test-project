@@ -1,30 +1,62 @@
+initscript {
+  repositories {
+    maven {
+      name 'jenkins-repo'
+      url 'https://repo.jenkins-ci.org/releases/'
+      mavenContent {
+        releasesOnly()
+        includeGroup 'edu.hm.hafner'
+      }
+    }
+    mavenCentral()
+  }
+
+  dependencies {
+    classpath "edu.hm.hafner:analysis-model:10.9.0"
+  }
+}
+
 // Collect paths
 def projectDirs = java.util.concurrent.ConcurrentHashMap.newKeySet()
 def testExecutions = java.util.concurrent.ConcurrentHashMap.newKeySet()
 def checkstyleReports = java.util.concurrent.ConcurrentHashMap.newKeySet()
-def javacLogs = java.util.concurrent.ConcurrentHashMap.newKeySet()
+def reviewdogJsons = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
-class StdoutCapture implements StandardOutputListener {
-  final BufferedWriter os
+class StdoutCapture extends edu.hm.hafner.analysis.ReaderFactory implements StandardOutputListener {
+  final String taskName
+  final StringWriter out
 
-  StdoutCapture(final BufferedWriter os) {
-    this.os = os
+  StdoutCapture(final String taskName, final StringWriter out) {
+    super(java.nio.charset.StandardCharsets.UTF_8)
+
+    this.taskName = taskName
+    this.out = out
   }
 
   @Override
   void onOutput(final CharSequence output) {
-    os.append(output)
+    out.append(output)
+  }
+
+  @Override
+  String getFileName() {
+    return this.taskName
+  }
+
+  @Override
+  Reader create() {
+    return new StringReader(this.out.toString())
   }
 }
 
 class TaskCaptureListener implements TaskExecutionListener {
+  def parserRegistry = new edu.hm.hafner.analysis.registry.ParserRegistry()
   private final ThreadLocal<StandardOutputListener> state = ThreadLocal.withInitial { null }
 
   @Override
   void beforeExecute(Task task) {
-    if (task instanceof AbstractCompile && task.hasProperty('outputLogFile')) {
-      task.outputLogFile.parentFile.mkdirs()
-      def listener = new StdoutCapture(task.outputLogFile.newWriter('UTF-8'))
+    if (task instanceof AbstractCompile && task.hasProperty('outputReviewdogJson') && task.hasProperty('expectedReporters')) {
+      def listener = new StdoutCapture(task.path, new StringWriter())
       // task.logging.addStandardOutputListener(listener)
       task.logging.addStandardErrorListener(listener)
       state.set(listener)
@@ -39,8 +71,90 @@ class TaskCaptureListener implements TaskExecutionListener {
       if (oldCapture != null) {
         // task.logging.removeStandardOutputListener(oldCapture)
         task.logging.removeStandardErrorListener(oldCapture)
-        oldCapture.os.close()
+
+        def parsers = task.expectedReporters.collect { parserRegistry.get(it).createParser() }
+        def report = new edu.hm.hafner.analysis.Report(task.path, task.name)
+        parsers.each { parser ->
+          if (parser.accepts(oldCapture)) {
+            report.addAll(parser.parse(oldCapture))
+          }
+        }
+        // read contents of log
+        logReportMessages(report)
+        task.outputReviewdogJson.parentFile.mkdirs()
+        task.outputReviewdogJson.withWriter('UTF-8') { writer ->
+          writer.writeLine(reportToRdJson(report))
+        }
       }
+    }
+
+    if (task instanceof Test) {
+      // prepare JUnit report, fill in file names if possible
+    }
+  }
+
+  String reportToRdJson(final edu.hm.hafner.analysis.Report report) {
+    return groovy.json.JsonOutput.toJson([
+      source: [
+        name: report.id
+      ],
+      diagnostics: report.collect { issue -> 
+        [
+          message: issue.message,
+          location: [
+            path: issue.absolutePath,
+            range: [
+              start: [
+                line: issue.lineStart,
+                column: issue.columnStart
+              ],
+              end: [
+                line: issue.lineEnd,
+                column: issue.columnEnd
+              ]
+            ]
+          ],
+          severity: severityToRd(issue.severity),
+          source: [
+            name: undefinedToNull(issue.originName)
+          ],
+          code: [
+            value: undefinedToNull(issue.type)
+          ]
+        ]
+      }
+    ])
+  }
+
+  private String severityToRd(final edu.hm.hafner.analysis.Severity severity) {
+    switch (severity.name) {
+      case 'ERROR': 
+      case 'HIGH':
+        return 'ERROR'
+      case 'NORMAL':
+        return 'WARNING'
+      case 'LOW':
+      case 'INFO':
+        return 'INFO'
+      default:
+        return 'UNKNOWN_SEVERITY'
+    }
+  }
+
+  private String undefinedToNull(final String input) {
+    if ('-'.equals(input)) {
+      return null
+    }
+    return input
+  } 
+
+  void logReportMessages(final edu.hm.hafner.analysis.Report report) {
+    report.infoMessages.each {
+      println "::notice ::$it"
+    }
+
+    report.errorMessages.each {
+      println "::error ::$it"
     }
   }
 }
@@ -99,9 +213,10 @@ gradle.afterProject { project ->
   // capture output of javac
   def layout = project.layout
   project.tasks.withType(JavaCompile) {
-    it.ext.outputLogFile = layout.buildDirectory.file("java-compile-output/${it.name}.log").get().asFile
+    it.ext.outputReviewdogJson = layout.buildDirectory.file("java-compile-output/${it.name}.json").get().asFile
+    it.ext.expectedReporters = ['error-prone', 'java'] // https://github.com/jenkinsci/analysis-model/blob/master/SUPPORTED-FORMATS.md
     doFirst {
-      javacLogs << it.outputLogFile
+      reviewdogJsons << it.outputReviewdogJson
     }
   }
 }
@@ -113,7 +228,7 @@ gradle.buildFinished {
       projectDirs: projectDirs.collect { it.absolutePath },
       testExecutions: testExecutions.collect { it.absolutePath },
       checkstyleReports: checkstyleReports.collect { it.absolutePath },
-      javacLogs: javacLogs.collect { it.absolutePath }
+      reviewdogJsons: reviewdogJsons.collect { it.absolutePath }
     ])
     println "::set-output name=project-metadata::${json}"
 }
