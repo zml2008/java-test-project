@@ -34,14 +34,14 @@ runs:
     with:
       cache-read-only: "${{ inputs.store-cache }}"
       arguments: |
-        -I ./.github/actions/gather-data.init.gradle
+        -I ./.github/actions/run-gradle-capturing/gather-data.init.gradle
         ${{ inputs.arguments }}
   - name: "Process project output"
     id: "process-meta"
     uses: "actions/github-script@v5"
     with:
       script: |
-        const script = require('./.github/actions/process-gradle-data.js')
+        const script = require('./.github/actionsrun-gradle-capturing/process-gradle-data.js')
         await script({github, context, core, require})
   - name: "Archive test results"
     if: "${{ always() }}"
