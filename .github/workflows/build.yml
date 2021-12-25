@@ -4,7 +4,7 @@ name: "build"
   push:
     branches: "**"
     tags-ignore: ["**"]
-  pull-request:
+  pull_request:
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.event.number || github.ref }}"
@@ -53,5 +53,5 @@ jobs:
         with:
           arguments: publish
         env:
-          ORG_GRADLE_PROJECT_stellardriftUsername: "${{ secrets.SONATYPE_USERNAME }}"
-          ORG_GRADLE_PROJECT_stellardriftPassword: "${{ secrets.SONATYPE_PASSWORD }}"
+          ORG_GRADLE_PROJECT_stellardriftUsername: "${{ secrets.STELLARDRIFT_USERNAME }}"
+          ORG_GRADLE_PROJECT_stellardriftPassword: "${{ secrets.STELLARDRIFT_PASSWORD }}"
