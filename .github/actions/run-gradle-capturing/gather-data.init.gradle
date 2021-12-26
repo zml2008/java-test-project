@@ -50,6 +50,7 @@ class StdoutCapture extends edu.hm.hafner.analysis.ReaderFactory implements Stan
 }
 
 class TaskCaptureListener implements TaskExecutionListener {
+  private static final Logger LOGGER = Logging.getLogger("github-actions");
   def parserRegistry = new edu.hm.hafner.analysis.registry.ParserRegistry()
   private final ThreadLocal<StandardOutputListener> state = ThreadLocal.withInitial { null }
 
@@ -147,11 +148,11 @@ class TaskCaptureListener implements TaskExecutionListener {
 
   void logReportMessages(final edu.hm.hafner.analysis.Report report) {
     report.infoMessages.each {
-      println "::notice ::$it"
+      LOGGER.warn "::notice ::$it".toString()
     }
 
     report.errorMessages.each {
-      println "::error ::$it"
+       LLOGER.warn "::error ::$it".toString()
     }
   }
 }
@@ -227,5 +228,5 @@ gradle.buildFinished {
       checkstyleReports: checkstyleReports.collect { it.absolutePath },
       reviewdogJsons: reviewdogJsons.collect { it.absolutePath }
     ])
-    println "::set-output name=project-metadata::${json}"
+    logger.warn("::set-output name=project-metadata::${json}".toString())
 }
