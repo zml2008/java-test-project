@@ -66,14 +66,11 @@ runs:
       for i in $CHECKSTYLE_FILES; do
         echo "Reviewing $i"
         if [ -f "$i" ]; then
-          cat $i | reviewdog -reporter=github-check -f=checkstyle -name="checkstyle"
+          cat "$i" | reviewdog -reporter=github-check -f=checkstyle -name="checkstyle ($(basename $i))" -level=warning
         fi
       done
-      for i in $REVIEWDOG_JSONS; do
-        echo "Reviewing $i"
-        if [ -f "$i" ]; then
-          cat $i | reviewdog -reporter=github-check -f=rdjson -name=$(basename "$i")
-        fi
-      done
+      if [ ! -z "$REVIEWDOG_JSONS" ]; then
+        cat $REVIEWDOG_JSONS | reviewdog -reporter=github-check -f=rdjsonl -name="Compile Errors/Warnings" -level=warning
+      fi
       
   

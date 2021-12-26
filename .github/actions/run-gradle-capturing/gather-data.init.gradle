@@ -83,7 +83,9 @@ class TaskCaptureListener implements TaskExecutionListener {
         logReportMessages(report)
         task.outputReviewdogJson.parentFile.mkdirs()
         task.outputReviewdogJson.withWriter('UTF-8') { writer ->
-          writer.writeLine(reportToRdJson(report))
+          reportToRdJson(report).each {
+            writer.writeLine it
+          }
         }
       }
     }
@@ -93,12 +95,8 @@ class TaskCaptureListener implements TaskExecutionListener {
     }
   }
 
-  String reportToRdJson(final edu.hm.hafner.analysis.Report report) {
-    return groovy.json.JsonOutput.toJson([
-      source: [
-        name: report.id
-      ],
-      diagnostics: report.collect { issue -> 
+  Collection<String> reportToRdJson(final edu.hm.hafner.analysis.Report report) {
+    return report.collect { issue -> 
         [
           message: issue.message,
           location: [
@@ -122,8 +120,7 @@ class TaskCaptureListener implements TaskExecutionListener {
             value: undefinedToNull(issue.type)
           ]
         ]
-      }
-    ])
+      }.collect { groovy.json.JsonOutput.toJson(it) }
   }
 
   private String severityToRd(final edu.hm.hafner.analysis.Severity severity) {
@@ -213,7 +210,7 @@ gradle.afterProject { project ->
   // capture output of javac
   def layout = project.layout
   project.tasks.withType(JavaCompile) {
-    it.ext.outputReviewdogJson = layout.buildDirectory.file("java-compile-output/${it.name}.json").get().asFile
+    it.ext.outputReviewdogJson = layout.buildDirectory.file("java-compile-output/${it.name}.jsonl").get().asFile
     it.ext.expectedReporters = ['error-prone', 'java'] // https://github.com/jenkinsci/analysis-model/blob/master/SUPPORTED-FORMATS.md
     doFirst {
       reviewdogJsons << it.outputReviewdogJson
