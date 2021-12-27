@@ -1,3 +1,6 @@
+import groovy.transform.Canonical
+import groovy.transform.Immutable
+
 initscript {
   repositories {
     maven {
@@ -49,10 +52,75 @@ class StdoutCapture extends edu.hm.hafner.analysis.ReaderFactory implements Stan
   }
 }
 
+@Canonical
+final class Diagnostic {
+  String message
+  Location location
+  Severity severity // optional
+  Source source
+  Code code // optional
+  List<Suggestion> suggestions // optional
+  String original_output
+}
+
+enum Severity {
+  UNKNOWN_SEVERITY,
+  ERROR,
+  WARNING,
+  INFO,
+}
+
+@Immutable(copyWith = true)
+class Location {
+  String path; // absolute or relative file path
+  Range range; // optional
+}
+
+@Immutable(copyWith = true)
+class Source {
+  String name;
+  String url;
+}
+
+@Immutable(copyWith = true) 
+class Code {
+  String value;
+  String url;
+}
+
+@Immutable(copyWith = true)
+class Suggestion {
+  Range range; // where suggestion applies
+  String text; // empty string to delete
+}
+
+@Immutable(copyWith = true)
+class Range {
+  Position start;
+  Position end; // optional, exclusive
+}
+
+@Immutable(copyWith = true)
+class Position {
+  int line
+  int column
+}
+
+
 class TaskCaptureListener implements TaskExecutionListener {
   private static final Logger LOGGER = Logging.getLogger("github-actions");
+  private static final java.util.regex.Pattern STACKTRACE_LINE = ~/(?<loader>\/)?(?<module>(?<version>@)?\/)?package.class.method\((?<source>[^:]+):(?<lineno>[\d]+)\)/
+  private static final groovy.json.JsonGenerator jsonGenerator = new groovy.json.JsonGenerator.Options()
+    .excludeNulls()
+    .excludeFieldsByName('contentHash', 'originalClassName')
+    .build()
   def parserRegistry = new edu.hm.hafner.analysis.registry.ParserRegistry()
   private final ThreadLocal<StandardOutputListener> state = ThreadLocal.withInitial { null }
+  private final Collection<File> reviewdogJsons;
+
+  TaskCaptureListener(final Collection<File> reviewdogJsons) {
+    this.reviewdogJsons = reviewdogJsons
+  }
 
   @Override
   void beforeExecute(Task task) {
@@ -93,49 +161,70 @@ class TaskCaptureListener implements TaskExecutionListener {
 
     if (task instanceof Test) {
       // prepare JUnit report, fill in file names if possible
+      def reportDir = task.reports.junitXml.outputLocation.get().asFile
+      def classpath = new File(reportDir, 'test-classpath.txt')
+      if (!classpath.exists()) {
+        return
+      }
+
+      def knownFiles = classpath.readLines('UTF-8').collect { new File(it) }
+
+      def diagnostics = []
+      reportDir.eachFileMatch groovy.io.FileType.FILES, ~/.*\.xml$/, { file ->
+        println "Reading: $file"
+        def slurp = new XmlSlurper().parse(file)
+        if (slurp.testcase.'*'.failure || slurp.testcase.'*'.'system-out') {
+          println "Writing for $file"
+          
+          // we have to actually write something
+        }
+      }
+
+      logReportMessages(report)
+      def reviewDog = new File(reportDir, 'reviewdog.jsonl')
+      reviewDog.withWriter('UTF-8') { writer -> 
+        reportToRdJson(report).each {
+          writer.writeLine it
+        }
+      }
+      reviewdogJsons << reviewDog
     }
   }
 
   Collection<String> reportToRdJson(final edu.hm.hafner.analysis.Report report) {
-    return report.collect { issue -> 
-        [
-          message: issue.message,
-          location: [
-            path: issue.absolutePath,
-            range: [
-              start: [
-                line: issue.lineStart,
-                column: issue.columnStart
-              ],
-              end: [
-                line: issue.lineEnd,
-                column: issue.columnEnd
-              ]
-            ]
-          ],
-          severity: severityToRd(issue.severity),
-          source: [
-            name: undefinedToNull(issue.originName)
-          ],
-          code: [
-            value: undefinedToNull(issue.type)
-          ]
-        ]
-      }.collect { groovy.json.JsonOutput.toJson(it) }
+    return report.collect({ issue -> 
+      new Diagnostic(
+        message: String.join('\n', issue.message, issue.description),
+        location: new Location(
+          path: issue.absolutePath,
+          range: new Range(
+            start: new Position(issue.lineStart, issue.columnStart),
+            end: new Position(issue.lineEnd, issue.columnEnd)
+          )
+        ),
+        severity: severityToRd(issue.severity),
+        source: new Source(
+          name: undefinedToNull(issue.originName)
+        ),
+        code: new Code(
+          value: undefinedToNull(issue.type)
+        )
+      )
+    }).collect { jsonGenerator.toJson(it) }
   }
 
-  private String severityToRd(final edu.hm.hafner.analysis.Severity severity) {
+  private Severity severityToRd(final edu.hm.hafner.analysis.Severity severity) {
     switch (severity.name) {
       case 'ERROR': 
       case 'HIGH':
-        return 'ERROR'
+        return Severity.ERROR
       case 'NORMAL':
-        return 'WARNING'
+        return Severity.WARNING
       case 'LOW':
       case 'INFO':
-        return 'INFO'
+        return Severity.INFO
       default:
-        return 'UNKNOWN_SEVERITY'
+        return Severity.UNKNOWN_SEVERITY
     }
   }
 
@@ -158,7 +247,7 @@ class TaskCaptureListener implements TaskExecutionListener {
 }
 
 // Capture task output to a file
-def taskCapture = new TaskCaptureListener()
+def taskCapture = new TaskCaptureListener(reviewdogJsons)
 gradle.addListener taskCapture
 
 gradle.afterProject { project ->
