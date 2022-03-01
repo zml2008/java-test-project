@@ -37,7 +37,7 @@ runs:
         ${{ inputs.arguments }}
   - name: "Process project output"
     id: "process-meta"
-    uses: "actions/github-script@v5"
+    uses: actions/github-script@v6
     if: "${{ always() }}"
     with:
       script: |
