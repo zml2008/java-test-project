@@ -29,7 +29,7 @@ runs:
     if: ${{ runner.os == 'Linux' }}
   - name: "Run Gradle build"
     id: "execute"
-    uses: "gradle/gradle-build-action@v2"
+    uses: "gradle/gradle-build-action@v3"
     with:
       cache-read-only: "${{ inputs.store-cache }}"
       arguments: |
@@ -37,7 +37,7 @@ runs:
         ${{ inputs.arguments }}
   - name: "Process project output"
     id: "process-meta"
-    uses: "actions/github-script@v5"
+    uses: "actions/github-script@v7"
     if: "${{ always() }}"
     with:
       script: |
